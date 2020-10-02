@@ -1,0 +1,462 @@
+---
+title: "Gender Pay Gap: Individuatl Dataset"
+output: html_document
+---
+DS1 Final Project   09.07.2020  Maki Terao
+Part C: individual data set
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(tidyverse)
+library(ggplot2)
+library(corrplot)
+library (readr)
+library(plyr)
+library(reldist)#for gini coefficients
+```
+
+Data is 2018 ACS PUMS Massachusetts State (This is for MA analysis, Script is same for WA and GA)
+https://www2.census.gov/programs-surveys/acs/data/pums/2018/1-Year/
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+setwd("C:/Users/terao/OneDrive/DataScience/BLS")
+data=read_csv("psam_p25.csv", col_names=T)
+#chose related variables. including child variable (I can only find OC and PAOC in this dataset)
+ma=data[c("AGEP","HISP","NATIVITY","MAR","SEX","SCHL","SCHG","RELP","RAC1P","OCCP","WAOB", "OC","PAOC", "WAGP")]
+```
+
+View missing values
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+missing_data = ma%>% summarise_all(funs(sum(is.na(.))/n()))
+missing_data = gather(missing_data, key = "variables", value = "percent_missing")
+ggplot(missing_data, aes(x = reorder(variables, percent_missing), y = percent_missing*100)) +
+  geom_bar(stat = "identity", fill = "dark blue", aes(color = I('white')), size = 0.3)+
+  xlab('variables')+ylab('% missing')+ggtitle('% of Missing Variables')+
+  coord_flip()+ 
+  theme_bw()
+
+```
+Take a look SEX, 1 male, 2 female,  OC "child" , PAOC, "cild and their age" distribution of entire dataset. PAOC does not provide much information.  
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+ma$SEX=factor(ma$SEX)
+table(ma$SEX)
+ma$OC=factor(ma$OC)
+table(ma$OC)
+ma$PAOC=factor(ma$PAOC)
+table(ma$PAOC)
+```
+Drop all observations with $0 WAGP (last 12 months wage) variable and take a look child, education and age variables for the group.
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+maworker=subset(ma, WAGP!=0)
+summary(maworker$WAGP) 
+table(maworker$OC)
+summary(maworker$AGEP)
+```
+Create "ocpCat" occupation category (530 subcategories to 25 major cotegories)
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+maworker$OCCP=as.numeric(maworker$OCCP)
+
+x=maworker$OCCP
+maworker$ocpCat[x<=440]="MGR"
+maworker$ocpCat[500<=x & x<=750]="BUS"
+maworker$ocpCat[800<=x & x <= 960]="FIN"
+maworker$ocpCat[1005<=x & x<=1240]="CMM"
+maworker$ocpCat[1305<=x & x <= 1560]="ENG"
+maworker$ocpCat[1600<=x & x<=1980]="SCI"
+maworker$ocpCat[2001<=x & x <= 2060]="CMS"
+maworker$ocpCat[2100<=x & x<=2180]="LGL"
+maworker$ocpCat[2205<=x & x <= 2555]="EDU"
+maworker$ocpCat[2600<=x & x<=2920]="ENT"
+maworker$ocpCat[3000<=x & x <= 3550]="MED"
+maworker$ocpCat[3601<=x & x <= 3655]="HLS"
+maworker$ocpCat[3700<=x & x<=3960]="PRT"
+maworker$ocpCat[4000<=x & x <= 4160]="EAT"
+maworker$ocpCat[4200<=x & x<=4255]="CLN"
+maworker$ocpCat[4330<=x & x <= 4655]="PRS"
+maworker$ocpCat[4700<=x & x <= 4965]="SAL"
+maworker$ocpCat[5000<=x & x<=5940]="OFF"
+maworker$ocpCat[6005<=x & x <= 6130]="FFF"
+maworker$ocpCat[6200<=x & x<=6765]="CON"
+maworker$ocpCat[6800<=x & x <= 6950]="EXT"
+maworker$ocpCat[7000<=x & x <= 7750]="RPR"
+maworker$ocpCat[7800<=x & x<=8990]="PRD"
+maworker$ocpCat[9005<=x & x <= 9760]="TRN"
+maworker$ocpCat[9800<=x & x<=9830]="MIL"
+maworker$ocpCat[9920==x]="UNE"
+
+```
+Drop annual wage value less than $23,920 (38,237->26,655)
+Exclude part-time, less than full year workers.  Median increases $65,000
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+maworkerF=subset(maworker, WAGP >= 23920)
+summary(maworkerF$WAGP) 
+```
+Take a look at SEX and OC after dropping less than 23,900 and median wage by sex.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+table(maworkerF$OC) #only 1 observation with child (unable to use this variable)
+
+table(maworkerF$MAR)#1 Married~5 Never Married (see EDA below for description)
+
+#by sex male , female
+mwsex=ddply(maworkerF, .(SEX), summarize, medwage=median(WAGP))
+mwsex
+```
+
+Calculate male/ female median wage, pay gap, and number of workers by ocpCat
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+mwlist=ddply(maworkerF, .(ocpCat), summarize, medwage=median(WAGP))
+#median wage by ocpCat 
+d=aggregate(maworkerF$WAGP, by=list(maworkerF$ocpCat,maworkerF$SEX), FUN=median)
+colnames(d)=c("ocpCat", "SEX", "wage")
+d=spread(d,SEX, wage)
+mwlist=left_join(mwlist, d, by="ocpCat", dupliate=F)
+names(mwlist)[3]="male"
+names(mwlist)[4]="female"
+mwlist$mapper=mwlist$female/mwlist$male
+#num of workers by ocpCat
+mwlist$ttlwk=table(maworkerF$ocpCat)
+e=maworkerF %>% group_by(SEX, ocpCat) %>% tally()
+e=spread(e,SEX,n)
+mwlist=left_join(mwlist, e, by="ocpCat", duplicate=F)
+names(mwlist)[7]="ttlml"
+names(mwlist)[8]="ttlfl"
+
+#write.csv(mwlist,"ocpCatma.csv", row.names=F)
+
+```
+
+Create age category "ageC"
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+summary(maworkerF$AGEP) #median 46, Mean 45.13 (higher than WA & GA)
+
+x=maworkerF$AGEP
+maworkerF$ageC[x<=24]="1"
+maworkerF$ageC[25<=x & x<=34]="2"
+maworkerF$ageC[35<=x & x <= 44]="3"
+maworkerF$ageC[45<=x & x<=54]="4"
+maworkerF$ageC[55<=x & x <= 64]="5"
+maworkerF$ageC[65<=x]="6"
+table(maworkerF$ageC)
+
+```
+Create race category "raceC" and "latino"
+I will assume "HISP" variable's 02~24 are latino and within non-latino group, categorize by 
+variable RAC1P.  RAC1P, I will categorize by 1.White, 2. Black 6. Asian, 3~5&7. Native, 8& 9.other
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#table(maworkerF$RAC1P) #no hispanic category
+#table(maworkerF$HISP)  #01: not hispanic 02~24: hispanic
+
+x=maworkerF$HISP
+maworkerF$latino[x=="01"]="0" #not-hispanic/ latino  
+maworkerF$latino[x!="01"]="1" #hispanic 
+#table(maworkerF$latino)# 0=24,928, 1=1727
+
+x=maworkerF$RAC1P
+y=maworkerF$latino
+maworkerF$raceC[y!=1 & x==1]="1" #white 
+maworkerF$raceC[y!=1 & x==2]="2" #black
+maworkerF$raceC[y!=1 & x==6 ]="3" #asian
+maworkerF$raceC[y!=1 & (x==3|x==4|x==5|x==7)]="5"#native
+maworkerF$raceC[y!=1 & (x==8|x==9)]="6"#other
+maworkerF$raceC[y==1]="4"#hispanic or latino
+table(maworkerF$raceC)
+
+```
+Create education attainment category "edC" see EDA for category description. 
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+x=maworkerF$SCHL
+maworkerF$edC[x<=15]="1"
+maworkerF$edC[16<=x & x<=17]="2"
+maworkerF$edC[18<=x & x <= 20]="3"
+maworkerF$edC[x==21]="4"
+maworkerF$edC[x==22]="5"
+maworkerF$edC[x==23]="6"
+maworkerF$edC[x==24]="7"
+maworkerF$edC=as.numeric(maworkerF$edC)
+hist(maworkerF$edC)
+```
+Take a look at variance, etc.
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+var(log(maworkerF$WAGP))
+sd(maworkerF$WAGP)
+gini(maworkerF$WAGP)
+
+#write.csv(maworkerF,"maworkerF.csv",row.names=F)
+#maworkerF=read.csv("maworkerF.csv")
+```
+EDA
+Total population by SEX: (remove package "plyr") 
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+detach("package:plyr", unload = TRUE)
+
+par(mfrow=c(1,4))
+#all dataset
+data %>% 
+  group_by(SEX) %>% 
+  summarise(Count = n())%>% 
+  mutate(percent = prop.table(Count)*100)%>%
+  ggplot(aes(x=SEX,y=percent), fill = SEX)+
+  geom_col(fill = c("grey", "light blue"))+
+  geom_text(aes(label = sprintf("%.1f%%", percent)), hjust = 0.2, vjust = 2, size = 5)+ 
+  theme_bw()+  
+  xlab("SEX 1:male  2:female") + ylab("Percent") + ggtitle("MA Population by SEX")
+#workers only
+maworkerF %>% 
+  group_by(SEX) %>% 
+  summarise(Count = n())%>% 
+  mutate(percent = prop.table(Count)*100)%>%
+  ggplot(aes(x=SEX, y=percent), fill = SEX)+
+  geom_col(fill = c("grey", "light blue"))+
+  geom_text(aes(label = sprintf("%.1f%%", percent)), hjust = 0.2, vjust = 2, size = 5)+ 
+  theme_bw()+  
+  xlab("SEX 1:male  2:female") + ylab("Percent") + ggtitle("MA Worker (full) by SEX")
+
+#tech (CMM) only subset
+maCMM=subset(maworkerF, ocpCat=="CMM") #1562 ttl
+maCMM %>% 
+  group_by(SEX) %>% 
+  summarise(Count = n())%>% 
+  mutate(percent = prop.table(Count)*100)%>%
+  ggplot(aes(x=SEX, y=percent), fill = SEX)+
+  geom_col(fill = c("grey", "light blue"))+
+  geom_text(aes(label = sprintf("%.1f%%", percent)), hjust = 0.2, vjust = 2, size = 5)+ theme_bw()+  
+  xlab("SEX 1:male  2:female") + ylab("Percent") + ggtitle("Tech Worker by SEX")
+
+#high wage only
+maHW=subset(maworkerF, WAGP>=150000)
+maHW %>% 
+  group_by(SEX) %>% 
+  summarise(Count = n())%>% 
+  mutate(percent = prop.table(Count)*100)%>%
+  ggplot(aes(x=SEX, y=percent), fill = SEX)+
+  geom_col(fill = c("grey", "light blue"))+
+  geom_text(aes(label = sprintf("%.1f%%", percent)), hjust = 0.2, vjust = 2, size = 5)+ theme_bw()+  
+  xlab("SEX 1:male  2:female") + ylab("Percent") + ggtitle("150K+ Workers by SEX")
+
+
+```
+Median Wage by SEX
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+mwsex %>% ggplot(aes(x=SEX, y=medwage))+geom_col(fill=c('grey','light blue'))+
+  geom_text(aes(label=paste0("$", medwage)), hjust = 0.2, vjust = 2, size = 5)+
+   theme_bw()+  
+  xlab("SEX 1:male  2:female") + ylab("") + ggtitle("Median Wage by SEX")
+```
+Number of workers & median wage by occupational category
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+par(mfrow=c(1,2))
+#num of workders by Occupational Category 
+maworkerF %>% group_by(ocpCat) %>% summarise(ocp=n()/1000)  %>% 
+  ggplot(aes(x=reorder(ocpCat, ocp),y=ocp))+geom_bar(stat='identity', fill='dark blue')+
+  coord_flip()+
+  labs(x='Occupational Category', y='Number of Workers (thousands)')
+
+#median wage by occp category
+mwlist %>% ggplot(aes(x=reorder(ocpCat, medwage), y=medwage/1000))+
+  geom_bar(stat='identity', fill='dark blue')+coord_flip()+
+  labs(x='Occupational Category', y='Median Wage (100K)')
+
+```
+Number of workers by education attainment
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+par(mfrow=c(1,2))
+ed_class=c('1'='Less than a high school diploma', '2'='High school graduate or GED', '3'='Some college or associate degree', 
+           '4'="Bachelor's degree", '5'="Master's degree", '6'="Professional degree", '7'="PhD")
+#all workers
+maworkerF %>% group_by(edC) %>% summarize(n=n()) %>% 
+  ggplot(aes(x=reorder(ed_class[edC], -edC), y=n/1000))+geom_bar(stat='identity', fill='dark blue')+
+  labs(x='', y='Number of Workers (thousands)', title='All Occupations' )+
+  coord_flip()
+
+#tech only
+maCMM %>% group_by(edC) %>% summarize(n=n()) %>% 
+  ggplot(aes(x=reorder(ed_class[edC], -edC), y=n))+geom_bar(stat='identity', fill='dark blue')+
+  labs(x='', y='Number of Workers', title='Tech Only' )+
+  coord_flip()
+
+```
+Number of workers by age group
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+age_class=c('1'='16 to 24', '2'='25 to 34', '3'='35 to 44', '4'='45 to 54', '5'='55 to 64', '6'='65 and older')
+maworkerF %>% group_by(ageC) %>% summarize(n=n()) %>% 
+  ggplot(aes(x=age_class[ageC], y=n/1000))+geom_bar(stat='identity', fill='dark blue')+
+  labs(x='', y='Number of Workers (thousands)', title='All Occupations' )
+maCMM %>% group_by(ageC) %>% summarize(n=n()) %>% 
+  ggplot(aes(x=age_class[ageC], y=n))+geom_bar(stat='identity', fill='dark blue')+
+  labs(x='', y='Number of Workers', title='Tech Only' )
+
+```
+Change ageC, SEX, raceC(latino), MAR, Nativity variables to factor 
+```{r}
+mdata=maworkerF[c('ageC','SEX','edC','raceC','MAR','NATIVITY','ocpCat','OCCP','WAGP')]
+mdata[,c(1:8)]=lapply(mdata[c(1:8)], as.factor)
+#all with WAGP
+fit1=lm(WAGP~.-OCCP, data=mdata) 
+summary(fit1)
+```
+All workers with log WAGP (better R^2)
+
+```{r}
+fit2=lm(log(WAGP)~.-OCCP, data=mdata)
+summary(fit2)
+```
+
+All workers all 530 OCCP facotrs & log WAGP +OCCP (MAR and NATIVITY did not show so I changed variables order)
+```{r}
+fit3=lm(log(WAGP)~.-ocpCat, data=mdata)#adj R2=0.4488 SEX2=-0.1914
+summary(fit3)
+ 
+```
+Exclude high wage group 
+n=23,996 (90.02% of total maworkerF) R2 0.3435 SEX2=-0.1315
+
+```{r}
+mdataP=subset(mdata, WAGP <=150000)
+fit5=lm(log(WAGP)~.-OCCP, data=mdataP)
+summary(fit5)
+table(mdataP$SEX)
+#                 1     2 
+#<=150,000 group  12228 11768 
+#>150,000  group  1995  664 
+
+```
+Single only 
+n=7399 (m 3925, f3463)
+
+```{r}
+mdataS=subset(mdata, MAR=="5")
+table(mdataS$SEX)
+
+mdataS=mdataS[,-5]
+fitS=lm(log(WAGP)~.-OCCP,data=mdataS)
+summary(fitS)#R2=0.3261  SEX2=-0.08406
+summary(mdataS$WAGP)#median wage goes down $50,000
+summary(mdataS$ageC)#younger distribution 
+```
+Compare single women and all male group
+n=17,686
+
+```{r}
+mdataM=subset(mdata, (SEX=="1"|(SEX=="2"& MAR=="5")))
+table(mdataM$SEX)
+mdataM=mdataM[,-5]
+
+#with all OCCP R2=0.46, SEX2=-0.1877
+fit6=lm(log(WAGP)~.-ocpCat, data=mdataM)
+summary(fit6)
+```
+
+
+```{r}
+#with ocpCat only R2=0.4079, SEX2=-0.2276
+fit7=lm(log(WAGP)~.-OCCP, data=mdataM)
+summary(fit7)
+
+```
+To see impact of marital status for both sex group
+```{r}
+#female only n=12,432
+mdataF=subset(mdata, SEX=="2") 
+mdataF=mdataF[,-2]
+fit8=lm(log(WAGP)~.-OCCP, data=mdataF)
+summary(fit8)#R2=0.3547  MAR5=-0.0737
+```
+```{r}
+#male only n=14,223
+mdataE=subset(mdata, SEX=="1") 
+mdataE=mdataE[,-2]
+fit10=lm(log(WAGP)~.-OCCP, data=mdataE)
+summary(fit10) #R2=0.3982  MAR5=-0.2469
+
+```
+Create coefficient data table
+```{r}
+stat01 = coef(summary(fit2))[, c("Estimate","t value")] %>% as.data.frame()
+stat01=rownames_to_column(stat01, var="variables")
+stat02=coef(summary(fit3))[, c("Estimate","t value")] %>% as.data.frame()
+stat02=rownames_to_column(stat02, var="variables")
+coefdata=left_join(stat01, stat02, by="variables")
+colnames(coefdata)=c("p", "Estimate", "t value", "Estimate OCCP", "t value OCCP")
+
+#write.csv(coefdata, "coefdata1.csv", row.names = F)
+```
+For all male and single female result AND single male and single female result 
+
+```{r}
+stat07 = coef(summary(fit7))[, c("Estimate","t value")] %>% as.data.frame()
+stat07=rownames_to_column(stat07, var="variables")
+stat06=coef(summary(fit6))[, c("Estimate","t value")] %>% as.data.frame()
+stat06=rownames_to_column(stat06, var="variables")
+statS=coef(summary(fitS))[, c("Estimate","t value")] %>% as.data.frame()
+statS=rownames_to_column(statS, var="variables")
+
+coefdata2=left_join(stat07, stat06, by="variables")
+coefdata2=left_join(coefdata2, statS, by="variables")
+colnames(coefdata2)=c("p", "Estimate", "t value", "Estimate OCCP", "t value OCCP","Estimate S", "t value S" )
+#write.csv(coefdata2, "coefdata2.csv", row.names = F)
+
+```
+
+
+```
+I run this code for project but it is getting really long so I did not show result. 
+Result shown in Power Point. 
+
+#tech job only n=1562
+tecdata=maCMM[c('ageC','SEX','edC','raceC','OCCP','MAR','NATIVITY','WAGP')]
+table(tecdata$SEX)
+tecdata[,c(1:7)]=lapply(tecdata[c(1:7)], as.factor)
+fitA=lm(log(WAGP)~., data=tecdata) #adj R2=0.3632
+summary(fitA)
+
+#other occupation OFF
+maOFF=subset(maworkerF, ocpCat=="OFF") #2765 ttl
+table(maOFF$SEX)#male 787, female 1978
+offdata=maOFF[c('ageC','SEX','edC','raceC','OCCP','MAR','NATIVITY','WAGP')]
+offdata[,c(1:7)]=lapply(offdata[c(1:7)], as.factor)
+str(offdata)
+fitC=lm(log(WAGP)~., data=offdata)
+summary(fitC) #R2=0.2468
+
+#managers
+maMGR=subset(maworkerF, ocpCat=="MGR") #6341 ttl
+table(maMGR$SEX)#male 3495, female 2846
+mgrdata=maMGR[c('ageC','SEX','edC','raceC','OCCP','MAR','NATIVITY','WAGP')]
+mgrdata[,c(1:7)]=lapply(mgrdata[c(1:7)], as.factor)
+str(mgrdata)
+fitF=lm(log(WAGP)~., data=mgrdata)
+summary(fitF) #R2=0.3075
+
+#sales
+maSAL=subset(maworkerF, ocpCat=="SAL") #1994 ttl
+table(maSAL$SEX)#male 1248, female 746
+saldata=maSAL[c('ageC','SEX','edC','raceC','OCCP','MAR','NATIVITY','WAGP')]
+saldata[,c(1:7)]=lapply(saldata[c(1:7)], as.factor)
+summary(saldata) 
+fitH=lm(log(WAGP)~., data=saldata)
+summary(fitH) #R2=0.3504
+
+
+#coefficient data table by ocp categories
+statA = coef(summary(fitA))[, c("Estimate","t value")] %>% as.data.frame()
+statA=rownames_to_column(statA, var="variables")
+statC=coef(summary(fitC))[, c("Estimate","t value")] %>% as.data.frame()
+statC=rownames_to_column(statC, var="variables")
+statF = coef(summary(fitF))[, c("Estimate","t value")] %>% as.data.frame()
+statF=rownames_to_column(statF, var="variables")
+statH=coef(summary(fitH))[, c("Estimate","t value")] %>% as.data.frame()
+statH=rownames_to_column(statH, var="variables")
+
+coefdata3=list(statA,statC,statF,statH) %>% reduce(merge, by="variables", all.x=F, no.dups=T)
+colnames(coefdata3)=c("p","CMM","CMM t-value", "OFF", "OFF t-value", "MGR", "MGR t-value", "SAL", "SAL t-value")
+
+write.csv(coefdata2, "coefdatama3.csv", row.names=F)
+
+
+```
+
+
