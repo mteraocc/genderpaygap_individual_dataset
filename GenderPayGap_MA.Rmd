@@ -17,7 +17,7 @@ library(reldist)#for gini coefficients
 Data is 2018 ACS PUMS Massachusetts State (This is for MA analysis, Script is same for WA and GA)
 https://www2.census.gov/programs-surveys/acs/data/pums/2018/1-Year/
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
-setwd("C:/Users/terao/OneDrive/DataScience/BLS")
+
 data=read_csv("psam_p25.csv", col_names=T)
 #chose related variables. including child variable (I can only find OC and PAOC in this dataset)
 ma=data[c("AGEP","HISP","NATIVITY","MAR","SEX","SCHL","SCHG","RELP","RAC1P","OCCP","WAOB", "OC","PAOC", "WAGP")]
